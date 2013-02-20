@@ -11,7 +11,7 @@ setup(
     author = "farialama",
     author_email = "farialama@gmail.com",
     url = "https://github.com/farialima/django-tasks",
-    version = "r51",
+    version = "1.0.0",
     packages = find_packages(),
     zip_safe = False,
     include_package_data=True,
