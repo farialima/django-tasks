@@ -1,4 +1,4 @@
-### Django-tasks
+# Djangotasks
 
 Django-tasks is an asynchronous task management daemon, to execute long-running batch tasks (minutes, hours or even days) for Django applications.
 
