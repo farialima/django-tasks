@@ -32,7 +32,7 @@ It is tested on Linux and MacOS, and it should run on Windows (per [issue 16](ht
 
 To use django-tasks follow instructions.
 
-1. Normally build and install django-tasks in your environment using ```python setup.py sdist```
+1. Install djangotasks with pip: ```pip install git+git://github.com/vladignatyev/django-tasks.git``` 
 
 2. Add ```djangotasks``` Django application: 
 ```INSTALLED_APPS += ('djangotasks',)```
