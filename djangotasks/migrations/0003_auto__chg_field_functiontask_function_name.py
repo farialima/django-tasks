@@ -15,7 +15,7 @@ class Migration(SchemaMigration):
     def backwards(self, orm):
         
         # Changing field 'FunctionTask.function_name'
-        db.alter_column('djangotasks_functiontask', 'function_name', self.gf('django.db.models.fields.CharField')(max_length=400, primary_key=True))
+        db.alter_column('djangotasks_functiontask', 'function_name', self.gf('django.db.models.fields.CharField')(max_length=255, primary_key=True))
 
 
     models = {
