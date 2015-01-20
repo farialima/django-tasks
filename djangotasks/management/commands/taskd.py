@@ -36,8 +36,8 @@ from django.core.management.base import BaseCommand
 
 from django.utils.daemonize import become_daemon
 
-LOG_FORMAT = '%(asctime)s %(process)d:%(name)s %(levelname)s: %(message)s'
-LOG_DATEFMT = '%Y-%m-%d %H:%M:%S %Z'
+LOG_FORMAT = u'%(asctime)s %(process)d:%(name)s %(levelname)s: %(message)s'
+LOG_DATEFMT = u'%Y-%m-%d %H:%M:%S %Z'
 
 def _log_file():
     from django.conf import settings
