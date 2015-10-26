@@ -156,6 +156,7 @@ class Command(BaseCommand):
         parser.add_argument('action', type=str)
 
     def handle(self, *args, **options):
+        action = options['action']
         if action and action in ['start', 'stop', 'restart', 'run']:
 
             if action in ['start', 'restart']:
