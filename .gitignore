@@ -1,0 +1,9 @@
+*.pyc
+\.*
+env/*
+media/*
+dist/*
+dist
+env
+*.egg-info/
+
