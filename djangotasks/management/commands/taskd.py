@@ -27,25 +27,53 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-import sys, time, os, atexit
+import sys, time, os, atexit, errno
 import logging
 from signal import SIGTERM
 
 
 from django.core.management.base import BaseCommand
 
-from django.utils.daemonize import become_daemon
+from djangotasks.utils.daemonize import become_daemon
 
 LOG_FORMAT = u'%(asctime)s %(process)d:%(name)s %(levelname)s: %(message)s'
 LOG_DATEFMT = u'%Y-%m-%d %H:%M:%S %Z'
 
-def _log_file():
+def _file_setting(setting_name, file_name_default):
     from django.conf import settings
-    if hasattr(settings, 'TASKS_LOG_FILE'):
-        return settings.TASKS_LOG_FILE
+    if hasattr(settings, setting_name):
+        return getattr(settings, setting_name)
     else:
-        return '/tmp/django-tasks.log'
+        tmp_path = os.getenv('TEMP') if (os.name == 'nt') else '/tmp'
+        return os.path.join(tmp_path, file_name_default)
 
+def _log_file():
+    return _file_setting('TASKS_LOG_FILE', 'django-tasks.log')
+
+def _pid_file():
+    return _file_setting('TASKS_PID_FILE', 'django-taskd.pid')
+
+def _pid_exists(pid):
+    if os.name == 'nt':
+        import psutil
+        return psutil.pid_exists(pid)
+    else:
+        return _pid_exists_posix(pid)
+
+def _pid_exists_posix(pid):
+    if pid == 0:
+        return True
+    try:
+        os.kill(pid, 0)
+    except OSError as err:
+        if err.errno == errno.ESRCH:
+            return False
+        elif err.errno == errno.EPERM:
+            return True
+        else:
+            raise err
+    else:
+        return True
 
 
 #
@@ -95,20 +123,20 @@ class Daemon:
 
     def start(self):
         pid = self._getpid()
-        if pid:
-            try:
-                os.getsid(pid)
+        if pid is not None:
+            if _pid_exists(pid):
                 sys.stderr.write("Daemon already running.\n")
-            except:
-                sys.stderr.write("pidfile %s already exists, but daemon is not running. Delete pidfile and retry.\n" % self.pidfile)
-            sys.exit(1)
+                sys.exit(1)
+            else:
+                sys.stderr.write("Removing stale pidfile.\n")
+                os.remove(self.pidfile)
 
         self.daemonize()
         self.run()
 
     def stop(self):
         pid = self._getpid()
-        if not pid:
+        if pid is None:
             sys.stderr.write("pidfile %s does not exist, cannot stop daemon.\n" % self.pidfile)
             return # not an error in a restart
 
@@ -167,8 +195,7 @@ class Command(BaseCommand):
                 from django.conf import settings
                 settings.TASKS_LOG_FILE = ''
 
-            daemon = TaskDaemon(os.path.join(os.getenv('TEMP') if (os.name == 'nt') else '/tmp',
-                                             'django-taskd.pid'))
+            daemon = TaskDaemon(_pid_file())
             getattr(daemon, action)()
         else:
             return "Usage: %s %s start|stop|restart|run\n" % (sys.argv[0], sys.argv[1])
