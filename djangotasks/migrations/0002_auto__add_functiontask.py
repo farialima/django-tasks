@@ -10,7 +10,7 @@ class Migration(SchemaMigration):
         
         # Adding model 'FunctionTask'
         db.create_table('djangotasks_functiontask', (
-            ('function_name', self.gf('django.db.models.fields.CharField')(max_length=400, primary_key=True)),
+            ('function_name', self.gf('django.db.models.fields.CharField')(max_length=255, primary_key=True)),
         ))
         db.send_create_signal('djangotasks', ['FunctionTask'])
 
@@ -24,7 +24,7 @@ class Migration(SchemaMigration):
     models = {
         'djangotasks.functiontask': {
             'Meta': {'object_name': 'FunctionTask'},
-            'function_name': ('django.db.models.fields.CharField', [], {'max_length': '400', 'primary_key': 'True'})
+            'function_name': ('django.db.models.fields.CharField', [], {'max_length': '255', 'primary_key': 'True'})
         },
         'djangotasks.task': {
             'Meta': {'object_name': 'Task'},
