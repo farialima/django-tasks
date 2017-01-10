@@ -32,13 +32,14 @@ import sys
 import time
 import subprocess
 import logging
-
-from django.db import models
-from django.conf import settings
-from datetime import datetime
-from os.path import join, exists, dirname, abspath
 from collections import defaultdict
-from django.db import transaction, connection
+from os.path import join, exists, dirname, abspath
+
+
+from django.apps import apps
+from django.conf import settings
+from django.db import transaction, connection, models
+from django.utils import timezone
 from django.utils.encoding import smart_unicode
 
 from djangotasks import signals
@@ -49,7 +50,7 @@ def _get_model_name(model_class):
     return smart_unicode(model_class._meta)
 
 def _get_model_class(model_name):
-    model = models.get_model(*model_name.split("."))
+    model = apps.get_model(*model_name.split("."))
     if model == None:
         raise Exception("%s is not a registered model, cannot use this task" % model_name)
     return model
@@ -201,7 +202,7 @@ class TaskManager(models.Manager):
     def mark_start(self, pk, pid):
         # Set the start information in all cases: That way, if it has been set
         # to "requested_cancel" already, it will be cancelled at the next loop of the scheduler
-        rowcount = self.filter(pk=pk).update(pid=pid, start_date=datetime.now())
+        rowcount = self.filter(pk=pk).update(pid=pid, start_date=timezone.now())
         if rowcount == 0:
             raise Exception("Failed to mark task with ID %d as started, task does not exist" % pk)
 
@@ -221,7 +222,7 @@ class TaskManager(models.Manager):
         return rowcount != 0
 
     def mark_finished(self, pk, new_status, existing_status):
-        rowcount = self.filter(pk=pk).filter(status=existing_status).update(status=new_status, end_date=datetime.now())
+        rowcount = self.filter(pk=pk).filter(status=existing_status).update(status=new_status, end_date=timezone.now())
         if rowcount == 0:
             LOG.warning('Failed to mark tasked as finished, from status "%s" to "%s" for task %s. May have been finished in a different thread already.',
                         existing_status, new_status, pk)
@@ -382,9 +383,8 @@ class Task(models.Model):
                 env['PYTHONPATH'] = os.pathsep.join(sys.path)
                 proc = subprocess.Popen([sys.executable, 
                                          '-c',
-                                         'from django.core.management import ManagementUtility; ManagementUtility().execute()',
-                                         'runtask', 
-                                         str(self.pk),
+                                         'import sys; from django.core.management import execute_from_command_line; execute_from_command_line(sys.argv)',
+                                         "runtask", str(self.pk),
                                          ],
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT,
@@ -426,7 +426,7 @@ class Task(models.Model):
             Task.objects.mark_finished(self.pk,
                                        "successful" if returncode == 0 else "unsuccessful",
                                        "running")
-            
+
         import thread
         thread.start_new_thread(exec_thread, ())
 
@@ -529,6 +529,9 @@ class FunctionTask(models.Model):
 
 Task.objects.register_task(FunctionTask.run_function_task, "Run a function task")
 
+
+# TODO: for simplicity, we always include the test model... this should not be the case, of course
+from djangotasks.tests import TestModel
 
 if 'DJANGOTASK_DAEMON_THREAD' in dir(settings) and settings.DJANGOTASK_DAEMON_THREAD:
     import logging

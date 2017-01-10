@@ -36,16 +36,12 @@
 # 
 #
 
-
-# The Task model is public, to load tasks and read their status, log, pid, timings...
-from djangotasks.models import Task
-
-
 def register_task(method, documentation, *required_methods):
     ''' Register a method of a model class as a task that can be executed asynchronously
 
     The method must be an unbound method of a model class.
     '''
+    from djangotasks.models import Task
     Task.objects.register_task(method, documentation, *required_methods)
 
 
@@ -54,6 +50,7 @@ def tasks_for_object(object):
 
     The returned tasks can then be used for display information... or to be started.
     '''
+    from djangotasks.models import Task
     return Task.objects.tasks_for_object(object.__class__, object.pk)
 
 
@@ -63,6 +60,7 @@ def task_for_object(object_method):
     The parameter must be the method of a bound object, not an unbound class method.
     This is a shortcut to calling tasks_for_object and selecting the task for the method
     '''
+    from djangotasks.models import Task
     return Task.objects.task_for_object(object_method.im_class, object_method.im_self.pk, object_method.im_func.__name__)
 
 
@@ -72,6 +70,7 @@ def task_for_function(function):
     Any package-level function that does not take any parameters can be run as a asynchronously. 
     
     Contrary to model objects methods, functions do not need to be registered in order to be available as tasks.'''
+    from djangotasks.models import Task
     return Task.objects.task_for_function(function)
 
 
@@ -80,6 +79,7 @@ def run_task(task):
     
     The task will be re-run (and the previous one archived) if it has already run. 
     In that case, the object returned by run_task will be the new task.'''
+    from djangotasks.models import Task
     return Task.objects.run_task(task.pk)
 
 
@@ -87,9 +87,11 @@ def cancel_task(task):
     '''Cancels the task.
 
     '''
+    from djangotasks.models import Task
     return Task.objects.cancel_task(task.pk)
 
 
 def current_task():
     ''' In the proces that's executing a task, the task being executed. None in all other cases.'''
+    from djangotasks.models import Task
     return Task.objects.current_task

@@ -15,48 +15,52 @@ Also, no other software or library is needed. Django-tasks simply uses the Djang
 
 ## Main features
 
-Features include:
-
+* Task starting, monitoring
 * Log gathering: at anytime, you can access the standard output created by your tasks,
 * Start time, end time... of course
 * Task dependency: only run a task of some other dependent task(s) have run (useful when multiple tasks require that one long processing has already happened),
 * History (archive) of tasks already run on an object. This is helpful if there are errors or problem, to keep a log of what has run in the past,
 * Basic admin view that lets you see what has been, or is, running,
+* Events on task changes (start, end...)
 * Cancel running tasks (kills the process).
 
-This is now (August 2010) used in production for a hosted website, and a distributed product, so you should see fixes and improvements over time. Feedback is welcome.
+This has been used in production for a hosted website in 2010; since then it has not been used much, but it has been updated recently, and all tests are passing.
 
-It is tested on Linux and MacOS, and it should run on Windows (per [issue 16](https://code.google.com/p/django-tasks/issues/detail?id=16)); and on PostgreSQL and SQLite (with some caveats for SQLite, see below)
+It is tested on Linux and MacOS, and it should run on Windows (per [issue 16](https://code.google.com/p/django-tasks/issues/detail?id=16)); and on PostgreSQL and SQLite (with some caveats for SQLite, see below).
+
+The current version is tested on Django 1.10 with Python 2.7. Making it work with earlier versions of Django should not be difficult. It is not (yet) working with Python 3, but should soon.
 
 ## Basic usage
 
-To use django-tasks follow instructions.
+On Django 1.10, follow the instructions to use Django tasks. 
 
-1. Install djangotasks with pip: ```pip install git+git://github.com/vladignatyev/django-tasks.git``` 
+1. Install djangotasks with pip: ```pip install git+git://github.com/farialima/django-tasks.git``` 
 
-2. Add ```djangotasks``` Django application: 
-```INSTALLED_APPS += ('djangotasks',)```
-And build database scheme for the application using:
-```python manage.py syncdb``` and then ```python manage.py migrate djangotasks```
+2. Add ```djangotasks``` Django application
 
-3. Write your long-running jobs' code. 
+```INSTALLED_APPS += [ 'djangotasks' ]```
+
+Install the database for the application using:
+```python manage.py migrate djangotasks```
+
+3. Write your long-running jobs' code
 
     Create method for any of your models:
     ```
     class MyModel(models.Model):
-        # ...
         def long_task(self):
-            sleep(5)
+            import time
+            time.sleep(10)
     ```
 
-    Right here in ```models.py``` register the task:
+    In your ```models.py``` also, register the task:
     ```
     import djangotasks
     djangotasks.register_task(MyModel.long_task, "My first long running task")
     ```
 
     Run your tasks from [Django View](https://docs.djangoproject.com/en/dev/topics/http/views/) or [Django Admin Action](https://docs.djangoproject.com/en/dev/ref/contrib/admin/actions/) using the following code. 
-    In ```views.py```:
+    In ```views.py``` (_not tested_):
     ```
     import djangotasks
 
@@ -67,6 +71,9 @@ And build database scheme for the application using:
     ```
     Or in ```admin.py```:
     ```
+    from .models import MyModel
+    import djangotasks
+
     def run_my_model_longtask(modeladmin, request, queryset):
         for my_model_object in queryset:
             task = djangotasks.task_for_object(my_model_object.long_task)
@@ -75,17 +82,51 @@ And build database scheme for the application using:
     run_my_model_longtask.short_description = "My first long running task admin action"
 
 
-    class MyModelAdmin(ModelAdmin):
+    class MyModelAdmin(admin.ModelAdmin):
         actions = [run_my_model_longtask,]
 
-    site.register(MyModel, MyModelAdmin)
+    admin.site.register(MyModel, MyModelAdmin)
     ```
 
-4. Run worker with ```python manage.py taskd start```
-It can run either as a thread in your process (provided you only run one server process) or as a separate process. To run it in-process (as a thread), just set ```DJANGOTASK_DAEMON_THREAD = True``` in your ```settings.py```. Note: avoid using as thread configuration in production.
+    Register your app in settings.py
+
+    ```INSTALLED_APPS += [ 'my_app' ]```
+
+    Install the database for the application using:
+    
+    ```python manage.py makemigrations && python manage.py migrate```
+
+4. Run the task daemon with ```python manage.py taskd start```
+It can run either as a thread in your process (provided you only run one server process) or as a separate daemon. To run it in-process (as a thread), just set ```DJANGOTASK_DAEMON_THREAD = True``` in your ```settings.py```. Do not run as a thread in production, only use as an external daemon.
 
 Now you can view the status of your task in the 'Djangotasks' Admin module.
 
 You can of course use the Task model in your own models and views, to provide specific user interface for your own tasks, or poll the status of the task.
+
+
+### Development and testing
+
+To run the tests, create a project and add the ```djangotasks``` app to it.
+
+The tests cannot run on SQLite, as they access the database from multiple threads: they can only run on MySQL (or possibly PostgreSQL, but not tested).
+
+You must specify a test database name in your settings:
+```
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'your-db-name',
+        'USER': 'your-db-user',
+        'PASSWORD': 'your-db-password',
+        'HOST': 'localhost',   # Or an IP Address that your DB is hosted on
+        'PORT': '3306',
+        'TEST': {
+            'NAME': 'djangotasks-test',
+            'SERIALIZE': False
+        },
+    }
+}
+```
+Then run the tests normally using ```manage.py test```.
 
 

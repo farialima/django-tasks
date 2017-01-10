@@ -35,11 +35,13 @@ from django.core.management.base import BaseCommand
 class Command(BaseCommand):
     args = "task_id"
     
+    def add_arguments(self, parser):
+        parser.add_argument(
+            'task_id',
+            help='ID of the task object to execute',
+        )
+        
     def handle(self, *args, **options):
-        if len(args) != 1:
-            self.print_help(sys.argv[0], sys.argv[1])
-            return
-            
         if 'DJANGOTASKS_TESTING' in os.environ:
             # In tests, we make sure that we are using the right database connection
             # This code is heavily inspired by BaseDatabaseCreation._create_test_db in django/db/backends/creation.py
@@ -48,8 +50,8 @@ class Command(BaseCommand):
             for alias in connections:
                 connection = connections[alias]
                 connection.close()
-                if connection.settings_dict['TEST_NAME']:
-                    test_database_name = connection.settings_dict['TEST_NAME']
+                if connection.settings_dict['TEST'] and connection.settings_dict['TEST']['NAME']:
+                    test_database_name = connection.settings_dict['TEST']['NAME']
                 else:
                     from django.db.backends.creation import TEST_DATABASE_PREFIX
                     test_database_name = TEST_DATABASE_PREFIX + connection.settings_dict['NAME']
@@ -69,5 +71,5 @@ class Command(BaseCommand):
         LOG.addHandler(logging.StreamHandler())
         LOG.setLevel(logging.INFO)
 
-        return Task.objects.exec_task(*args)
+        return Task.objects.exec_task(options['task_id'])
         
