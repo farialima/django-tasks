@@ -1,11 +1,7 @@
+
 # Djangotasks
 
 Django-tasks is an asynchronous task management daemon, to execute long-running batch tasks (minutes, hours or even days) for Django applications.
-
-The following repo is the clone of original repo at [Google Code](http://code.google.com/p/django-tasks/).
-
-Current version is formed from revision r51 of original SVN repo. 
-
 
 ## About
 
@@ -15,20 +11,20 @@ Also, no other software or library is needed. Django-tasks simply uses the Djang
 
 ## Main features
 
-* Task starting, monitoring
+* Task starting, monitoring,
 * Log gathering: at anytime, you can access the standard output created by your tasks,
-* Start time, end time... of course
+* Start time, end time...
 * Task dependency: only run a task of some other dependent task(s) have run (useful when multiple tasks require that one long processing has already happened),
 * History (archive) of tasks already run on an object. This is helpful if there are errors or problem, to keep a log of what has run in the past,
 * Basic admin view that lets you see what has been, or is, running,
-* Events on task changes (start, end...)
+* Events on task changes (start, end...),
 * Cancel running tasks (kills the process).
 
 This has been used in production for a hosted website in 2010; since then it has not been used much, but it has been updated recently, and all tests are passing.
 
 It is tested on Linux and MacOS, and it should run on Windows (per [issue 16](https://code.google.com/p/django-tasks/issues/detail?id=16)); and on PostgreSQL and SQLite (with some caveats for SQLite, see below).
 
-The current version is tested on Django 1.10 with Python 2.7. Making it work with earlier versions of Django should not be difficult. It is not (yet) working with Python 3; it should be easy to make it work there.
+The current version is tested on Django 1.10 with Python 2.7. Making it work with earlier versions of Django should not be difficult. It is not (yet) working with Python 3; it should be easy to port it.
 
 ## Basic usage
 
@@ -38,10 +34,11 @@ On Django 1.10, follow the instructions to use Django tasks.
 
 2. Add ```djangotasks``` Django application
 
-```INSTALLED_APPS += [ 'djangotasks' ]```
+	```INSTALLED_APPS += [ 'djangotasks' ]```
 
-Install the database for the application using:
-```python manage.py migrate djangotasks```
+	Install the database for the application using:
+    
+	```python manage.py migrate djangotasks```
 
 3. Write your long-running jobs' code
 
@@ -59,6 +56,8 @@ Install the database for the application using:
     ```
 
     Or for a function _without parameter_:
+
+    ```
     from djangotasks import task
 
     @task
@@ -67,7 +66,7 @@ Install the database for the application using:
          from djangotasks import current_task
          assert(current_task.is_running()) # by definition
          time.sleep(10)
-    
+    ```
     Note that methods or functions with parameters are not supported; and passing parameter as global variable will not work, as the task will run in a different thread and process.
 
     Run your tasks from [Django View](https://docs.djangoproject.com/en/dev/topics/http/views/) or [Django Admin Action](https://docs.djangoproject.com/en/dev/ref/contrib/admin/actions/) using the following code. 
@@ -107,21 +106,26 @@ Install the database for the application using:
     Install the database for the application using:
     
     ```python manage.py makemigrations && python manage.py migrate```
+    
 
 4. Run the task daemon with ```python manage.py taskd start```
-It can run either as a thread in your process (provided you only run one server process) or as a separate daemon. To run it in-process (as a thread), just set ```DJANGOTASK_DAEMON_THREAD = True``` in your ```settings.py```. Do not run as a thread in production, only use as an external daemon.
 
-Now you can view the status of your task in the 'Djangotasks' Admin module.
+	It can run either as a thread in your process (provided you only run one server process) or as a separate daemon. To run it in-process (as a thread), just set ```DJANGOTASK_DAEMON_THREAD = True``` in your ```settings.py```. Do not run as a thread in production, only use as an external daemon.
 
-You can of course use the Task model in your own models and views, to provide specific user interface for your own tasks, or poll the status of the task.
+	Now you can view the status of your task in the 'Djangotasks' Admin module.
 
-In your code, you can also add things like:
-   ``` task = my_model_object.long_method()
+	You can of course use the Task model in your own models and views, to provide specific user interface for your own tasks, or poll the status of the task.
+
+	In your code, you can also add things like:
+   ``` 
+   	   task = my_model_object.long_method()
+       print task.log
        if task.is_running();
           task.cancel()
-              
+      
        tasks = task.archives()
-       ```
+       # etc...
+   ```
 
 5. Advanced usage: dependent tasks
 
