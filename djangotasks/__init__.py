@@ -31,67 +31,46 @@
 # Public API to use DjangoTasks.
 #
 # The functions below should be sufficient to work with djangotasks.
-# Please enter bugs on http://code.google.com/p/django-tasks if you need anything more.
-# This API is still work-in-progress: it may still change, although it is probably quite stable.
-# 
+# Please enter bugs on https://github.com/farialima/django-tasks/ if you need anything more.
+#
 #
 
-def register_task(method, documentation, *required_methods):
-    ''' Register a method of a model class as a task that can be executed asynchronously
-
-    The method must be an unbound method of a model class.
-    '''
-    from djangotasks.models import Task
-    Task.objects.register_task(method, documentation, *required_methods)
-
-
-def tasks_for_object(object):
-    ''' Return all the tasks that are registered for this model object.
-
-    The returned tasks can then be used for display information... or to be started.
-    '''
-    from djangotasks.models import Task
-    return Task.objects.tasks_for_object(object.__class__, object.pk)
-
-
-def task_for_object(object_method):
-    ''' Return the task for this object method.
-
-    The parameter must be the method of a bound object, not an unbound class method.
-    This is a shortcut to calling tasks_for_object and selecting the task for the method
-    '''
-    from djangotasks.models import Task
-    return Task.objects.task_for_object(object_method.im_class, object_method.im_self.pk, object_method.im_func.__name__)
-
-
-def task_for_function(function):
-    ''' Create (or find, if has been created already) a task for this function. 
-
-    Any package-level function that does not take any parameters can be run as a asynchronously. 
+def task(*methods_or_functions):
+    ''' Decorator to transform a function, or a model method, into a task.
     
-    Contrary to model objects methods, functions do not need to be registered in order to be available as tasks.'''
-    from djangotasks.models import Task
-    return Task.objects.task_for_function(function)
+    Once decorated with @task, the function can only run as an asynchronous task.
+    It returns a Task object that can be run (asynchronously), by calling its run() method.
 
+    The method or function must have no parameters, as they would not be passed to the task;
+    and they should not return anything, since the return value would be lost.
 
-def run_task(task):
-    ''' Runs the task. 
-    
-    The task will be re-run (and the previous one archived) if it has already run. 
-    In that case, the object returned by run_task will be the new task.'''
-    from djangotasks.models import Task
-    return Task.objects.run_task(task.pk)
-
-
-def cancel_task(task):
-    '''Cancels the task.
-
+    see djangotasks.models.Task for more information about the Task object.
     '''
-    from djangotasks.models import Task
-    return Task.objects.cancel_task(task.pk)
 
+    if hasattr(methods_or_functions[0], 'wrapped_method_or_function'): 
+        # The first argument is already a task, so it must be a dependent;
+        # it means that the annotation was called with parameters.
+        # So we return the annotation itself, but with the dependents already set.
+        def partial_task(the_method):
+            return task(the_method, *methods_or_functions)
+        return partial_task
+
+    method_or_function = methods_or_functions[0]
+    dependents = methods_or_functions[1:] or None
+
+    def return_task(instance=None):
+        from djangotasks.models import Task
+        if instance:
+            return Task.objects.task_for_object(instance, method_or_function, dependents)
+        else:
+            return Task.objects.task_for_function(method_or_function, dependents)
+
+    return_task.wrapped_method_or_function = method_or_function
+    return return_task
 
 def current_task():
-    ''' In the proces that's executing a task, the task being executed. None in all other cases.'''
+    '''The task being executed. 
+
+    Only available in the process that's executing a task; None in all other cases.'''
     from djangotasks.models import Task
     return Task.objects.current_task

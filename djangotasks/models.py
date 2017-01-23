@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2010 by nexB, Inc. http://www.nexb.com/ - All rights reserved.
+# Copyright (c) 2010-2017 by nexB, Inc. http://www.nexb.com/ - All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without modification,
 # are permitted provided that the following conditions are met:
@@ -59,93 +59,64 @@ def _get_model_class(model_name):
 class TaskManager(models.Manager):
     '''The TaskManager class is not for public use. 
 
-
     The package-level API should be sufficient to use django-tasks.
     '''
 
-
-    # The only real role of DEFINED_TASKS, in fact, is to keep track of the *current* list of dependent tasks for each task.
-    # If we were to accept the fact that, when upgrading application code and changing the dependencies of tasks,
-    # it is acceptable that the tasks that already exist in the DB will still use the "old" set of dependencies,
-    # then we could store the list of dependencies as a field in the Task object, 
-    # and DEFINED_TASKS wouldn't be needed anymore. I'm still hesitating a little between the two solutions.
-    DEFINED_TASKS = defaultdict(list)
 
     # When executing a task, the current task being executed. 
     # Since only one task is executed per process, this can be a static.
     current_task = None
 
-    def register_task(self, method, documentation, *required_methods):
+    def task_for_object(self, object, method, dependents=None, status_in=None):
         import inspect
-        if not inspect.ismethod(method):
-            raise Exception(repr(method) + " is not a class method")
-        model = _get_model_name(method.im_class)
-        if len(required_methods) == 1 and required_methods[0].__class__ in [list, tuple]:
-            required_methods = required_methods[0]
+        if len(inspect.getargspec(method)[0]) != 1:
+            raise Exception("Cannot use tasks on a method that has parameters")
 
-        for required_method in required_methods:
-            if not inspect.ismethod(required_method):
-                raise Exception(repr(required_method) + " is not a class method")
-            if required_method.im_func.__name__ not in [method_name for method_name, _, _ in TaskManager.DEFINED_TASKS[model]]:
-                raise Exception(repr(required_method) + " is not registered as a task method for model " + model)
-            
-        TaskManager.DEFINED_TASKS[model].append((method.im_func.__name__, 
-                                                 documentation if documentation else '',
-                                                 ','.join(required_method.im_func.__name__ 
-                                                          for required_method in required_methods)))
+        dependent_names = [ dependent_method.wrapped_method_or_function.__name__ for dependent_method in dependents ] if dependents else None
+        return self._task_for_object(object.__class__, object.pk,
+                                     method.__name__, dependent_names, status_in)
 
-    def task_for_object(self, the_class, object_id, method, status_in=None):
-        model = _get_model_name(the_class)
-        if method not in [m for m, _, _ in TaskManager.DEFINED_TASKS[model]]:
-            raise Exception("Method '%s' not registered for model '%s'" % (method, model))
-
-        taskdef = [taskdef for taskdef in TaskManager.DEFINED_TASKS[model] 
-                   if taskdef[0] == method][0]
-
-        if not status_in:
+    def _task_for_object(self, object_class, object_id, method_name, dependents, status_in=None):
+        if not object_id:
+            raise Exception("The object must first be saved in the database")
+        model_name = _get_model_name(object_class)
+        if status_in == None:
             status_in = dict(STATUS_TABLE).keys()
             
         from django.core.exceptions import MultipleObjectsReturned
         try:
-            task, created = self.get_or_create(model=model, 
-                                               method=method,
+            task, created = self.get_or_create(model=model_name, 
+                                               method=method_name,
                                                object_id=str(object_id),
                                                status__in=status_in,
-                                               archived=False)
+                                               archived=False, 
+                                               dependents=(','.join(dependents) if dependents else None))
         except MultipleObjectsReturned, e:
             LOG.exception("Integrity error: multiple non-archived tasks, should not occur. Attempting recovery by archiving all tasks for this object and method, and recreating them")
-            objects = self.filter(model=model, 
-                                  method=method,
+            objects = self.filter(model=model_name, 
+                                  method=method_name,
                                   object_id=str(object_id),
                                   status__in=status_in,
                                   archived=False).update(archived=True)
-            task, created = self.get_or_create(model=model, 
-                                               method=method,
+            task, created = self.get_or_create(model=model_name, 
+                                               method=method_name,
                                                object_id=str(object_id),
                                                status__in=status_in,
                                                archived=False)
 
-        if created:
-            self.filter(pk=task.pk).update(description=taskdef[1])
-
-        LOG.debug("Created task %d on model=%s, method=%s, object_id=%s", task.id, model, method, object_id)
+        LOG.debug("Created task %d on model=%s, method=%s, object_id=%s", task.id, model_name, method_name, object_id)
         return self.get(pk=task.pk)
 
-    def tasks_for_object(self, the_class, object_id):
-        model = _get_model_name(the_class)
-
-        return [self.task_for_object(the_class, object_id, method)
-                for method, _, _ in TaskManager.DEFINED_TASKS[model]]
-            
-    def task_for_function(self, function):
+    def task_for_function(self, function, dependents=None):
         function_name = _to_function_name(function)
         function_task = FunctionTask.objects.get_or_create(function_name=function_name)
-        return self.task_for_object(FunctionTask, function_name,
-                                    FunctionTask.run_function_task.func_name)
+        dependent_names = [ _to_function_name(dependent_function.wrapped_method_or_function) 
+                            for dependent_function in dependents ] if dependents else None
+        return self._task_for_object(FunctionTask, function_name, "run_function_task", dependent_names)
 
     def run_task(self, pk):
         task = self.get(pk=pk)
-        self._run_required_tasks(task)
+        self._run_dependent_tasks(task)
         if task.status in ["scheduled", "running"]:
             return task
         if task.status in ["requested_cancel"]:        
@@ -153,30 +124,32 @@ class TaskManager(models.Manager):
         if task.status in ["cancelled", "successful", "unsuccessful"]:
             task = self._create_task(task.model, 
                                      task.method, 
-                                     task.object_id)
+                                     task.object_id,
+                                     task.dependents)
             
         self.filter(pk=task.pk).update(status="scheduled")
         return self.get(pk=task.pk)
 
-    def _run_required_tasks(self, task):
-        for required_task in task.get_required_tasks():
-            self._run_required_tasks(required_task)
+    def _run_dependent_tasks(self, task):
+        for dependent_task in task.get_dependent_tasks():
+            self._run_dependent_tasks(dependent_task)
 
-            if required_task.status in ['scheduled', 'successful', 'running']:
+            if dependent_task.status in ['scheduled', 'successful', 'running']:
                 continue
             
-            if required_task.status == 'requested_cancel':
-                raise Exception("Required task being cancelled, please try again")
+            if dependent_task.status == 'requested_cancel':
+                raise Exception("Dependent task being cancelled, please try again")
 
-            if required_task.status in ['cancelled', 'unsuccessful']:
+            if dependent_task.status in ['cancelled', 'unsuccessful']:
                 # re-run it
-                required_task = self._create_task(required_task.model, 
-                                                  required_task.method, 
-                                                  required_task.object_id)
+                dependent_task = self._create_task(dependent_task.model, 
+                                                  dependent_task.method, 
+                                                  dependent_task.object_id,
+                                                  dependent_task.dependents)
 
-            required_task.status = "scheduled"
-            required_task.save()
-            
+            dependent_task.status = "scheduled"
+            dependent_task.save()
+
     def cancel_task(self, pk):
         task = self.get(pk=pk)
         if task.status not in ["scheduled", "running"]:
@@ -185,12 +158,13 @@ class TaskManager(models.Manager):
         # If the task is still scheduled, mark it requested for cancellation also:
         # if it is currently starting, that's OK, it'll stay marked as "requested_cancel" in mark_start
         self._set_status(pk, "requested_cancel", ["scheduled", "running"])
+        return self.get(pk=task.pk)
 
 
     # The methods below are for internal use on the server. Don't use them directly.
-    def _create_task(self, model, method, object_id):
-        return Task.objects.task_for_object(_get_model_class(model), object_id, method, 
-                                            ["defined", "scheduled", "running", "requested_cancel"])
+    def _create_task(self, model, method, object_id, dependents):
+        return Task.objects._task_for_object(_get_model_class(model), object_id, method, dependents,
+                                             ["defined", "scheduled", "running", "requested_cancel"])
 
     def append_log(self, pk, log):
         if log:
@@ -230,7 +204,11 @@ class TaskManager(models.Manager):
             LOG.info('Task %s finished with status "%s"', pk, new_status)
             # Sending a task completion Signal including the task and the object
             task = self.get(pk=pk)
-            object = _get_model_class(task.model).objects.get(pk=task.object_id)
+            try:
+                object = _get_model_class(task.model).objects.get(pk=task.object_id)
+            except Exception, e:
+                print "PK =", task.object_id
+                raise # Exception("PK = " + str(task.object_id))
             signals.task_completed.send(sender=self, task=task, object=object)
     
     # This is for use in the scheduler only. Don't use it directly.
@@ -241,8 +219,10 @@ class TaskManager(models.Manager):
             self.current_task = self.get(pk=task_id)
 
             the_class = _get_model_class(self.current_task.model)
-            object = the_class.objects.get(pk=self.current_task.object_id)
-            the_method =  getattr(object, self.current_task.method)
+            the_object = the_class.objects.get(pk=self.current_task.object_id)
+
+            # bind the method to the object...
+            the_method =  getattr(the_object, self.current_task.method).wrapped_method_or_function.__get__(the_object, the_object.__class__)
 
             the_method()
         finally:
@@ -281,15 +261,15 @@ class TaskManager(models.Manager):
         tasks = self.filter(status="scheduled",
                             archived=False)
         for task in tasks:
-            # only run if all the required tasks have been successful
-            if any(required_task.status == "unsuccessful"
-                   for required_task in task.get_required_tasks()):
+            # only run if all the dependent tasks have been successful
+            if any(dependent_task.status == "unsuccessful"
+                   for dependent_task in task.get_dependent_tasks()):
                 task.status = "unsuccessful"
                 task.save()
                 continue
 
-            if all(required_task.status == "successful"
-                   for required_task in task.get_required_tasks()):
+            if all(dependent_task.status == "successful"
+                   for dependent_task in task.get_dependent_tasks()):
                 LOG.info("Starting task %s...", task.pk)
                 task.do_run()
                 LOG.info("...Task %s started.", task.pk)
@@ -321,10 +301,13 @@ class Task(models.Model):
                               default="defined",
                               choices=STATUS_TABLE,
                               )
-    description = models.CharField(max_length=100, default='', null=True, blank=True)
+
     log = models.TextField(default='', null=True, blank=True)
 
     archived = models.BooleanField(default=False) # for history
+
+    # comma-separated list of dependent methods
+    dependents = models.TextField(default=None, null=True)
 
     def __unicode__(self):
         return u'%s - %s.%s.%s' % (self.id, self.model.split('.')[-1], self.object_id, self.method)
@@ -339,32 +322,58 @@ class Task(models.Model):
     status_for_display.admin_order_field = 'status'
     status_for_display.short_description = 'Status'
 
-    def complete_log(self, directly_required_only=False):
-        return '\n'.join([required_task.formatted_log() 
-                          for required_task in self._unique_required_tasks(directly_required_only)])
+    def complete_log(self, directly_dependent_only=False):
+        return '\n'.join([dependent_task.formatted_log() 
+                          for dependent_task in self._unique_dependent_tasks(directly_dependent_only)])
 
-    def get_required_tasks(self):
-        taskdef = self._get_task_definition()
-        return [Task.objects.task_for_object(_get_model_class(self.model), self.object_id, method)
-                for method in taskdef[2].split(',') if method] if taskdef else []
+    def get_dependent_tasks(self):
+        if not self.dependents:
+            return []
+        
+        the_class = _get_model_class(self.model)
+        if the_class == FunctionTask:
+            # dependents are function names
+            return [ _to_function(function_name)()
+                     for function_name in self.dependents.split(',') ]
+        else:
+            the_object = the_class.objects.get(pk=self.object_id)
+            return [ getattr(the_object, method)()
+                     for method in self.dependents.split(',') ]
     
     def can_run(self):
         return self.status not in ["scheduled", "running", "requested_cancel", ] #"successful"
 
+    def is_runing(self):
+        return self.status == "running"
+
+    def run(self):
+        return Task.objects.run_task(self.pk)
+
+    def cancel(self):
+        return Task.objects.cancel_task(self.pk)
+
+    def archives(self):
+        '''returns all previous runs of this task for this object'''
+        return Task.objects.filter(model=self.model, 
+                                   method=self.method,
+                                   object_id=self.object_id,
+                                   archived=True)
+
     def formatted_log(self):
         from django.utils.dateformat import format
         FORMAT = "N j, Y \\a\\t P T"
+        description = self.model + '.' + self.method + '(pk = ' + str(self.object_id) + ') '
         if self.status in ['cancelled', 'successful', 'unsuccessful']:
-            return (self.description + ' started' + ((' on ' + format(self.start_date, FORMAT)) if self.start_date else '') +
+            return (description + 'started' + ((' on ' + format(self.start_date, FORMAT)) if self.start_date else '') +
                     (("\n" + self.log) if self.log else "") + "\n" +
-                    self.description + ' ' + self.status_string() + ((' on ' + format(self.end_date, FORMAT)) if self.end_date else '') +
+                    description + self.status_string() + ((' on ' + format(self.end_date, FORMAT)) if self.end_date else '') +
                     (' (%s)' % self.duration if self.duration else ''))
         elif self.status in ['running', 'requested_cancel']:
-            return (self.description + ' started' + ((' on ' + format(self.start_date, FORMAT)) if self.start_date else '') +
+            return (description + 'started' + ((' on ' + format(self.start_date, FORMAT)) if self.start_date else '') +
                     (("\n" + self.log) if self.log else "") + "\n" +
-                    self.description + ' ' + self.status_string())
+                    description + self.status_string())
         else:
-            return self.description + ' ' +  self.status_string()
+            return description + self.status_string()
                     
     # Only for use by the manager: do not call directly, except in tests
     def do_run(self):
@@ -396,13 +405,13 @@ class Task(models.Model):
                 while proc.poll() is None:
                     line = proc.stdout.readline()
                     buf += line
-
                     if (time.time() - t > 1): # Save the log once every second max
                         Task.objects.append_log(self.pk, buf)
                         buf = ''
                         t = time.time()
-                Task.objects.append_log(self.pk, buf)
-                
+
+                Task.objects.append_log(self.pk, buf) 
+               
                 # Need to continue reading for a while: sometimes we miss some output
                 buf = ''
                 while True:
@@ -451,24 +460,22 @@ class Task(models.Model):
         finally:
             Task.objects.mark_finished(self.pk, "cancelled", "requested_cancel")
 
-    def _unique_required_tasks(self, directly_required_only=False):
-        unique_required_tasks = []
-        for required_task in self.get_required_tasks():
-            if directly_required_only:
-                if required_task not in unique_required_tasks:
-                    unique_required_tasks.append(required_task)
+    def _unique_dependent_tasks(self, directly_dependent_only=False):
+        unique_dependent_tasks = []
+        for dependent_task in self.get_dependent_tasks():
+            if directly_dependent_only:
+                if dependent_task not in unique_dependent_tasks:
+                    unique_dependent_tasks.append(dependent_task)
             else:
-                for unique_required_task in required_task._unique_required_tasks():
-                    if unique_required_task not in unique_required_tasks:
-                        unique_required_tasks.append(unique_required_task)
-        if self not in unique_required_tasks:
-            unique_required_tasks.append(self)
-        return unique_required_tasks
+                for unique_dependent_task in dependent_task._unique_dependent_tasks():
+                    if unique_dependent_task not in unique_dependent_tasks:
+                        unique_dependent_tasks.append(unique_dependent_task)
+        if self not in unique_dependent_tasks:
+            unique_dependent_tasks.append(self)
+        return unique_dependent_tasks
 
     def save(self, *args, **kwargs):
         if not self.pk:
-            self._find_method() # will raise an exception if the method of this task is not registered
-            
             # time to archive the old ones
             Task.objects.filter(model=self.model, 
                                 method=self.method,
@@ -476,21 +483,6 @@ class Task(models.Model):
                                 archived=False).update(archived=True)
 
         super(Task, self).save(*args, **kwargs)
-
-    def _get_task_definition(self):
-        if self.model not in TaskManager.DEFINED_TASKS:
-            LOG.warning("A task on model=%s exists in the database, but is not defined in the code", self.model)
-            return None
-        taskdefs = [taskdef for taskdef in TaskManager.DEFINED_TASKS[self.model] if taskdef[0] == self.method]
-        if len(taskdefs) == 0:
-            LOG.debug("A task on model=%s and method=%s exists in the database, but is not defined in the code", self.model, self.method)
-            return None
-        return taskdefs[0]
-
-    def _find_method(self):
-        the_class = _get_model_class(self.model)
-        object = the_class.objects.get(pk=self.object_id)
-        return getattr(object, self.method)
 
     def _compute_duration(self):
         if self.start_date and self.end_date:
@@ -523,11 +515,11 @@ def _to_function(function_name):
 class FunctionTask(models.Model):
     function_name = models.CharField(max_length=255,
                                      primary_key=True)
+    from djangotasks import task
+    @task
     def run_function_task(self):
-        function = _to_function(self.function_name)
+        function = _to_function(self.function_name).wrapped_method_or_function
         return function()
-
-Task.objects.register_task(FunctionTask.run_function_task, "Run a function task")
 
 
 # TODO: for simplicity, we always include the test model... this should not be the case, of course

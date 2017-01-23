@@ -28,7 +28,7 @@ This has been used in production for a hosted website in 2010; since then it has
 
 It is tested on Linux and MacOS, and it should run on Windows (per [issue 16](https://code.google.com/p/django-tasks/issues/detail?id=16)); and on PostgreSQL and SQLite (with some caveats for SQLite, see below).
 
-The current version is tested on Django 1.10 with Python 2.7. Making it work with earlier versions of Django should not be difficult. It is not (yet) working with Python 3, but should soon.
+The current version is tested on Django 1.10 with Python 2.7. Making it work with earlier versions of Django should not be difficult. It is not (yet) working with Python 3; it should be easy to make it work there.
 
 ## Basic usage
 
@@ -45,19 +45,30 @@ Install the database for the application using:
 
 3. Write your long-running jobs' code
 
-    Create method for any of your models:
+    Create a method _without parameter_ for a model, and add it the @task decorator:
     ```
+    from djangotasks import task
+
     class MyModel(models.Model):
+        @task
         def long_task(self):
             import time
+            from djangotasks import current_task
+            assert(current_task.is_running())
             time.sleep(10)
     ```
 
-    In your ```models.py``` also, register the task:
-    ```
-    import djangotasks
-    djangotasks.register_task(MyModel.long_task, "My first long running task")
-    ```
+    Or for a function _without parameter_:
+    from djangotasks import task
+
+    @task
+    def long_function():
+         import time
+         from djangotasks import current_task
+         assert(current_task.is_running()) # by definition
+         time.sleep(10)
+    
+    Note that methods or functions with parameters are not supported; and passing parameter as global variable will not work, as the task will run in a different thread and process.
 
     Run your tasks from [Django View](https://docs.djangoproject.com/en/dev/topics/http/views/) or [Django Admin Action](https://docs.djangoproject.com/en/dev/ref/contrib/admin/actions/) using the following code. 
     In ```views.py``` (_not tested_):
@@ -65,8 +76,9 @@ Install the database for the application using:
     import djangotasks
 
     def test_view(request):
-        task = djangotasks.task_for_object(my_model_object.long_task)
-        djangotasks.run_task(task)
+        task = my_model_object.long_task()
+        task = task.run()
+        id = task.id
         return HttpResponse(task.id)
     ```
     Or in ```admin.py```:
@@ -76,14 +88,14 @@ Install the database for the application using:
 
     def run_my_model_longtask(modeladmin, request, queryset):
         for my_model_object in queryset:
-            task = djangotasks.task_for_object(my_model_object.long_task)
-            djangotasks.run_task(task)
+            task = my_model_object.long_task()
+            task.run()
 
     run_my_model_longtask.short_description = "My first long running task admin action"
 
 
     class MyModelAdmin(admin.ModelAdmin):
-        actions = [run_my_model_longtask,]
+        actions = [ run_my_model_longtask,]
 
     admin.site.register(MyModel, MyModelAdmin)
     ```
@@ -103,12 +115,38 @@ Now you can view the status of your task in the 'Djangotasks' Admin module.
 
 You can of course use the Task model in your own models and views, to provide specific user interface for your own tasks, or poll the status of the task.
 
+In your code, you can also add things like:
+   ``` task = my_model_object.long_method()
+       if task.is_running();
+          task.cancel()
+              
+       tasks = task.archives()
+       ```
+
+5. Advanced usage: dependent tasks
+
+You can define dependencies in your tasks. It will ensure that dependent tasks will run (finish and succeed) before the depending tasks -- but will not re-run if they have already successfully run. 
+
+To define a dependency, simply make sure that the dependent task has the `@task` decorator, and then pass it as a parameter to the `@task` decorator of the depending task. For example:
+
+    ``` 
+    class MyModel(models.Model):
+        @task
+        def run_first(self):
+           print "I run first"
+
+        @task(run_first):
+        def run_then(self):
+           print "I run second, if first has succeeded"
+
+     ```
+
 
 ### Development and testing
 
 To run the tests, create a project and add the ```djangotasks``` app to it.
 
-The tests cannot run on SQLite, as they access the database from multiple threads: they can only run on MySQL (or possibly PostgreSQL, but not tested).
+The tests cannot run on SQLite, as they access the database from multiple threads: they can only run on MySQL (or probably PostgreSQL, but not tested).
 
 You must specify a test database name in your settings:
 ```
