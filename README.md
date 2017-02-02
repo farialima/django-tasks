@@ -15,7 +15,7 @@ The current version (starting with 0.95) has a new API, much simplier than the A
 
 The current API is not planned to change from now on; only some more real-world usage is needed (feedback and bugs welcome !).
 
-Python 3 is supported starting with version 0.99.
+Python 3 is supported starting with version 0.98.
 
 ## Main features
 
