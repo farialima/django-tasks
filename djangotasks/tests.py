@@ -29,7 +29,11 @@
 from __future__ import with_statement 
 
 import sys
-import StringIO
+try:
+    from StringIO import StringIO
+except ImportError:
+    # python3
+    from io import StringIO
 import os
 import unittest
 import tempfile
@@ -58,7 +62,7 @@ class LogCheck(object):
         from djangotasks.models import LOG
         self.loghandlers = LOG.handlers
         LOG.handlers = []
-        self.log = StringIO.StringIO()
+        self.log = StringIO()
         test_handler = logging.StreamHandler(self.log)
         test_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
         self.loglevel = LOG.getEffectiveLevel()
@@ -88,7 +92,7 @@ class TestModel(models.Model):
 
 
     def _run(self, trigger_name, sleep=0.2):
-        print "running %s" % trigger_name
+        print("running %s" % trigger_name)
         sys.stdout.flush()
         time.sleep(sleep)
         self._trigger(trigger_name)
@@ -139,7 +143,7 @@ class TestModel(models.Model):
     @task
     def check_database_settings(self):
         from django.db import connection
-        print connection.settings_dict["NAME"]
+        print(connection.settings_dict["NAME"])
         time.sleep(0.1)
         self._trigger("check_database_settings")
 
@@ -156,14 +160,14 @@ def _start_message(task):
 
 @task
 def _test_function():
-    print "running _test_function"
+    print("running _test_function")
 
 @task(_test_function)
 def _test_function_with_dependent():
-    print "running _test_function_with_dependent"
+    print("running _test_function_with_dependent")
 
 def _some_function():
-    print "running _some_function"
+    print("running _some_function")
 
 class TasksTestCase(unittest.TestCase):
     def setUp(self):
@@ -277,14 +281,14 @@ class TasksTestCase(unittest.TestCase):
             the_task = o.a_method()
 
         self.assertEquals("'NotAValidModel' object has no attribute 'pk'", 
-                          context.exception.message)
+                          str(context.exception))
 
     def test_task_on_method_with_parameter(self):
         with self.assertRaises(Exception) as context:            
             task = self._create_object_and_test_task('run_method_with_parameter_should_fail', 'key')
             
         self.assertEquals("Cannot use tasks on a method that has parameters", 
-                          context.exception.message)
+                          str(context.exception))
             
 
     def test_task_on_function_with_parameter(self):
@@ -364,7 +368,7 @@ class TasksTestCase(unittest.TestCase):
         try:
             Task.objects.get(pk=task.pk)
             self.fail("Should throw an exception")
-        except Exception, e:
+        except Exception as e:
             self.assertEquals("Task matching query does not exist.", str(e))
             
         with LogCheck(self, 'WARNING: Failed to change status from "scheduled" to "running" for task %d\n' % task.pk):
@@ -373,9 +377,23 @@ class TasksTestCase(unittest.TestCase):
 
     def test_MultipleObjectsReturned_in_tasks(self):
         task = self._create_object_and_test_task('run_something_long', 'key1')
+        pk = task.pk
         task.pk = None
         super(Task, task).save()
-        task = self._create_object_and_test_task('run_something_long', 'key1')
+        new_pk = task.pk
+        self.assertNotEquals(new_pk, pk)
+        self.assertFalse(Task.objects.get(pk=pk).archived)
+        self.assertFalse(Task.objects.get(pk=new_pk).archived)
+        output_check = LogCheck(self, fail_if_different=False)
+        with output_check:
+            task = self._create_object_and_test_task('run_something_long', 'key1')
+
+        self.assertTrue(output_check.log.getvalue().startswith("ERROR: Integrity error: multiple non-archived tasks, should not occur. Attempting recovery by archiving all tasks for this object and method, and recreating them"))
+
+        self.assertNotEquals(new_pk, task.pk)
+        self.assertTrue(Task.objects.get(pk=pk).archived)
+        self.assertTrue(Task.objects.get(pk=new_pk).archived)
+        self.assertFalse(Task.objects.get(pk=task.pk).archived)
 
     def test_send_signal_on_task_completed(self):
         from djangotasks.models import TaskManager

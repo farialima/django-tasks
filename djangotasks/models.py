@@ -35,12 +35,23 @@ import logging
 from collections import defaultdict
 from os.path import join, exists, dirname, abspath
 
+try:
+    import thread
+except ImportError:
+    # python3 - on Windows, Linux and MacOS at least
+    import _thread as thread
+
 
 from django.apps import apps
 from django.conf import settings
 from django.db import transaction, connection, models
 from django.utils import timezone
-from django.utils.encoding import smart_unicode
+try:
+    from django.utils.encoding import smart_unicode
+except ImportError:
+    # python3
+    from django.utils.encoding import smart_text as smart_unicode
+   
 
 from djangotasks import signals
 
@@ -91,7 +102,7 @@ class TaskManager(models.Manager):
                                                status__in=status_in,
                                                archived=False, 
                                                dependents=(','.join(dependents) if dependents else None))
-        except MultipleObjectsReturned, e:
+        except MultipleObjectsReturned as e:
             LOG.exception("Integrity error: multiple non-archived tasks, should not occur. Attempting recovery by archiving all tasks for this object and method, and recreating them")
             objects = self.filter(model=model_name, 
                                   method=method_name,
@@ -169,7 +180,7 @@ class TaskManager(models.Manager):
     def append_log(self, pk, log):
         if log:
             # not possible to make it completely atomic in Django, it seems
-            rowcount = self.filter(pk=pk).update(log=(self.get(pk=pk).log + log))
+            rowcount = self.filter(pk=pk).update(log=(self.get(pk=pk).log + log.decode('utf-8')))
             if rowcount == 0:
                 raise Exception(("Failed to save log for task %d, task does not exist; log was:\n" % pk) + log)
 
@@ -204,11 +215,7 @@ class TaskManager(models.Manager):
             LOG.info('Task %s finished with status "%s"', pk, new_status)
             # Sending a task completion Signal including the task and the object
             task = self.get(pk=pk)
-            try:
-                object = _get_model_class(task.model).objects.get(pk=task.object_id)
-            except Exception, e:
-                print "PK =", task.object_id
-                raise # Exception("PK = " + str(task.object_id))
+            object = _get_model_class(task.model).objects.get(pk=task.object_id)
             signals.task_completed.send(sender=self, task=task, object=object)
     
     # This is for use in the scheduler only. Don't use it directly.
@@ -400,20 +407,20 @@ class Task(models.Model):
                                         close_fds=(os.name != 'nt'), 
                                         env=env)
                 Task.objects.mark_start(self.pk, proc.pid)
-                buf = ''
+                buf = b''
                 t = time.time()
                 while proc.poll() is None:
                     line = proc.stdout.readline()
                     buf += line
                     if (time.time() - t > 1): # Save the log once every second max
                         Task.objects.append_log(self.pk, buf)
-                        buf = ''
+                        buf = b''
                         t = time.time()
 
                 Task.objects.append_log(self.pk, buf) 
                
                 # Need to continue reading for a while: sometimes we miss some output
-                buf = ''
+                buf = b''
                 while True:
                     line = proc.stdout.readline()
                     if not line:
@@ -423,20 +430,19 @@ class Task(models.Model):
 
                 returncode = proc.returncode
 
-            except Exception, e:
+            except Exception as e:
                 LOG.exception("Exception in calling thread for task %s", self.pk)
                 import traceback
                 stack = traceback.format_exc()
                 try:
                     Task.objects.append_log(self.pk, "Exception in calling thread: " + str(e) + "\n" + stack)
-                except Exception, ee:
+                except Exception as ee:
                     LOG.exception("Second exception while trying to save the first exception to the log for task %s!", self.pk)
 
             Task.objects.mark_finished(self.pk,
                                        "successful" if returncode == 0 else "unsuccessful",
                                        "running")
 
-        import thread
         thread.start_new_thread(exec_thread, ())
 
     def _do_cancel(self):
@@ -454,7 +460,7 @@ class Task(models.Model):
                 
             import signal
             os.kill(self.pid, signal.SIGTERM)
-        except OSError, e:
+        except OSError as e:
             # could happen if the process *just finished*. Fail cleanly
             raise Exception('Failed to cancel task model=%s, method=%s, object=%s: %s' % (self.model, self.method, self.object_id, str(e)))
         finally:
@@ -526,9 +532,7 @@ class FunctionTask(models.Model):
 from djangotasks.tests import TestModel
 
 if 'DJANGOTASK_DAEMON_THREAD' in dir(settings) and settings.DJANGOTASK_DAEMON_THREAD:
-    import logging
     logging.getLogger().addHandler(logging.StreamHandler())
     logging.getLogger().setLevel(logging.INFO)
 
-    import thread
     thread.start_new_thread(Task.objects.scheduler, ())

@@ -9,7 +9,7 @@ setup(
     author = "Francois Granade",
     author_email = "djangotasks@farialima.net",
     url = "https://github.com/farialima/django-tasks",
-    version = "0.95",
+    version = "0.98",
     packages = find_packages(),
     include_package_data = True,
     zip_safe = False,

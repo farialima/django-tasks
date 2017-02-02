@@ -9,6 +9,14 @@ Django-tasks is for a different usage from most other tasks frameworks (Celery, 
 
 Also, no other software or library is needed. Django-tasks simply uses the Django database as a queue (and Tasks are a simple model); and each task is spawned as its own process.
 
+## Version history
+
+The current version (starting with 0.95) has a new API, much simplier than the API in previous versions (0.51, 0.52). If you used previous versions, you will need to modify your code -- but it should much simplier code.
+
+The current API is not planned to change from now on; only some more real-world usage is needed (feedback and bugs welcome !).
+
+Python 3 is supported starting with version 0.99.
+
 ## Main features
 
 * Task starting, monitoring,
@@ -22,13 +30,13 @@ Also, no other software or library is needed. Django-tasks simply uses the Djang
 
 This has been used in production for a hosted website in 2010; since then it has not been used much, but it has been updated recently, and all tests are passing.
 
-It is tested on Linux and MacOS, and it should run on Windows (per [issue 16](https://code.google.com/p/django-tasks/issues/detail?id=16)); and on PostgreSQL and SQLite (with some caveats for SQLite, see below).
+It is tested on Linux and MacOS, and it should run on Windows (per [issue 16](https://code.google.com/p/django-tasks/issues/detail?id=16)); and on MySQL and SQLite (with some caveats for SQLite, see below).
 
-The current version is tested on Django 1.10 with Python 2.7. Making it work with earlier versions of Django should not be difficult. It is not (yet) working with Python 3; it should be easy to port it.
+The current version is tested on Django 1.10.5 with Python 2.7 and Python 3.5. Getting it to work with earlier versions of Django should not be difficult.
 
 ## Basic usage
 
-On Django 1.10, follow the instructions to use Django tasks. 
+On Django 1.10, follow these instructions to install and use:
 
 1. Install djangotasks with pip: ```pip install git+git://github.com/farialima/django-tasks.git``` 
 
