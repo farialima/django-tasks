@@ -28,4 +28,4 @@
 
 from django.dispatch import Signal
 
-task_completed = Signal(providing_args=["task", "object"])
+task_completed = Signal()#providing_args=["task", "object"])
