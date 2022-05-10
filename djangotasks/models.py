@@ -46,19 +46,11 @@ from django.apps import apps
 from django.conf import settings
 from django.db import transaction, connection, models
 from django.utils import timezone
-try:
-    from django.utils.encoding import smart_unicode
-except ImportError:
-    # python3
-    from django.utils.encoding import smart_text as smart_unicode
-   
+
 
 from djangotasks import signals
 
 LOG = logging.getLogger("djangotasks")
-
-def _get_model_name(model_class):
-    return smart_unicode(model_class._meta)
 
 def _get_model_class(model_name):
     model = apps.get_model(*model_name.split("."))
@@ -90,7 +82,7 @@ class TaskManager(models.Manager):
     def _task_for_object(self, object_class, object_id, method_name, dependents, status_in=None):
         if not object_id:
             raise Exception("The object must first be saved in the database")
-        model_name = _get_model_name(object_class)
+        model_name = object_class._meta
         if status_in == None:
             status_in = dict(STATUS_TABLE).keys()
             
@@ -314,7 +306,7 @@ class Task(models.Model):
     archived = models.BooleanField(default=False) # for history
 
     # comma-separated list of dependent methods
-    dependents = models.TextField(default=None, null=True)
+    dependents = models.TextField(default=None, null=True, blank=True)
 
     def __unicode__(self):
         return u'%s - %s.%s.%s' % (self.id, self.model.split('.')[-1], self.object_id, self.method)
